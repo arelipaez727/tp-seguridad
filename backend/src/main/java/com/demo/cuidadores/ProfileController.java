@@ -4,6 +4,8 @@ import java.util.List;
 import jakarta.validation.constraints.Size;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController @RequestMapping("/api/profiles")
 public class ProfileController {
@@ -35,8 +37,14 @@ public class ProfileController {
     @PutMapping("/{id}")
     public Profile update(@PathVariable Long id, @RequestBody Profile in, Authentication auth) {
         Profile p = repo.findById(id).orElseThrow();
-        // ⚠️ VULNERABILIDAD 2 — IDOR (CWE-639): no se verifica que el perfil pertenezca al usuario autenticado.
-        // FIX: if (!p.ownerId.equals((Long) auth.getPrincipal())) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+
+        // Antes: no se verificaba el dueño (CWE-639, IDOR).
+        // Ahora: solo el usuario autenticado que es dueño del perfil puede modificarlo.
+        Long userId = (Long) auth.getPrincipal();
+        if (!p.ownerId.equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No tenés permiso para modificar este perfil");
+        }
+
         p.nombre = in.nombre; p.apellido = in.apellido; p.zona = in.zona;
         p.descripcion = in.descripcion; p.intereses = in.intereses; p.estudios = in.estudios;
         return repo.save(p);
