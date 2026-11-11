@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-const API = "http://localhost:8080/api";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8082/api";
 const ZONAS = ["Nueva Córdoba", "Alta Córdoba", "Cerro de las Rosas", "Villa Allende", "Güemes"];
 
 async function api(path, opts = {}, token) {

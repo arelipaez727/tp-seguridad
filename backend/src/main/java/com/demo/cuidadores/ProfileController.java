@@ -1,50 +1,25 @@
 package com.demo.cuidadores;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.List;
-import javax.sql.DataSource;
+import jakarta.validation.constraints.Size;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController @RequestMapping("/api/profiles")
 public class ProfileController {
-    private final ProfileRepository repo; private final DataSource dataSource;
-    public ProfileController(ProfileRepository repo, DataSource dataSource) { this.repo = repo; this.dataSource = dataSource; }
+    private final ProfileRepository repo;
+
+    public ProfileController(ProfileRepository repo) {
+        this.repo = repo;
+    }
 
     @GetMapping
-    public List<Profile> list(@RequestParam(required = false) String zona) throws Exception {
-        // Sin zona: devuelve la lista completa (uso normal del buscador).
+    public List<Profile> list(
+            @RequestParam(required = false)
+            @Size(max = 100, message = "La zona no puede superar los 100 caracteres")
+            String zona) {
         if (zona == null || zona.isBlank()) return repo.findAll();
-
-        // ⚠️ VULNERABILIDAD 1 — SQL INJECTION CON CONSULTAS APILADAS (CWE-89)
-        // El texto de la zona se concatena directamente en SQL nativo y se ejecuta con un Statement JDBC plano,
-        // que admite varias sentencias separadas por ";". Esto habilita tanto lectura fuera de lo previsto
-        // (ej: zzz' OR '1'='1' --) como modificación o borrado de datos (ej: zzz'; DELETE FROM profiles; --).
-        // FIX: usar un método derivado de Spring Data (findByZonaContainingIgnoreCase) o una consulta con
-        // parámetros nombrados, y nunca ejecutar texto de usuario como lote de sentencias.
-        String sql = "SELECT id, owner_id AS \"ownerId\", nombre, apellido, zona, descripcion, intereses, estudios " +
-                     "FROM profiles WHERE zona ILIKE '%" + zona + "%'";
-        List<Profile> out = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection(); Statement st = conn.createStatement()) {
-            boolean isResultSet = st.execute(sql);
-            if (isResultSet) {
-                try (ResultSet rs = st.getResultSet()) {
-                    while (rs.next()) {
-                        Profile p = new Profile();
-                        p.id = rs.getLong("id"); p.ownerId = rs.getLong("ownerId");
-                        p.nombre = rs.getString("nombre"); p.apellido = rs.getString("apellido");
-                        p.zona = rs.getString("zona"); p.descripcion = rs.getString("descripcion");
-                        p.intereses = rs.getString("intereses"); p.estudios = rs.getString("estudios");
-                        out.add(p);
-                    }
-                }
-            }
-        }
-        // Sin resultados -> lista vacía: el frontend la interpreta como "no se encontraron perfiles".
-        return out;
+        return repo.findByZonaContainingIgnoreCase(zona.trim());
     }
 
     @GetMapping("/{id}")

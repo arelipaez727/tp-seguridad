@@ -1,13 +1,13 @@
 # Cuidadores de mayores — app web con vulnerabilidades intencionales
 
-> ⚠️ **Solo para aprendizaje.** Esta app contiene 3 vulnerabilidades a propósito. Ejecutala solo en local, sin datos reales, y no la expongas a internet.
+> ⚠️ **Solo para aprendizaje.** La SQL Injection original fue corregida, pero la app todavía conserva vulnerabilidades intencionales de IDOR y autenticación. Ejecutala solo en local, sin datos reales, y no la expongas a internet.
 
 **Stack:** Java 17 · Maven · Spring Boot 3 (Web, Data JPA/Hibernate, Security + JWT) · PostgreSQL · React (Vite).
 
 ## Cómo ejecutar
 ```bash
-docker compose up -d                       # PostgreSQL en :5432
-cd backend && mvn spring-boot:run          # API en :8080
+docker compose up -d                       # PostgreSQL en :5433
+cd backend && mvn spring-boot:run          # API en :8082
 cd frontend && npm install && npm run dev  # Web en :5173
 ```
 (Sin Docker: creá una base `cuidadores` con usuario/clave `postgres`, o ajustá `application.properties`.)
@@ -19,23 +19,20 @@ Al arrancar por primera vez, el backend carga automáticamente 5 perfiles de eje
 - **Con una zona que tiene perfiles:** se muestran solo los que coinciden.
 - **Con una zona sin perfiles registrados:** se muestra el mensaje "No se encontraron perfiles para esa zona."
 
-## Vulnerabilidades (están marcadas con `⚠️` en el código)
+## Estado de las vulnerabilidades
 
-### 1. SQL Injection (CWE-89) — `GET /api/profiles?zona=...`
-La zona se concatena en una consulta SQL nativa, ejecutada con un `Statement` JDBC plano que admite varias sentencias separadas por `;` (`ProfileController.list`).
+### 1. SQL Injection (CWE-89) — corregida
+`GET /api/profiles?zona=...` usa actualmente el método derivado `findByZonaContainingIgnoreCase`. Spring Data enlaza `zona` como parámetro y ya no se construye SQL mediante concatenación.
 
-**Comprobación desde la interfaz:**
+**Comprobación de la corrección:**
 1. Abrí http://localhost:5173. Sin buscar nada, deberías ver los 5 perfiles de ejemplo.
 2. Buscá una zona inexistente, por ejemplo `zzz`, y confirmá el mensaje "No se encontraron perfiles para esa zona."
-3. Buscá exactamente: `zzz' OR '1'='1' --` (sin comillas invertidas). Deberían aparecer todos los perfiles, a pesar de que la zona no existe.
+3. Buscá exactamente: `zzz' OR '1'='1' --` (sin comillas invertidas). Debe continuar apareciendo el mensaje de cero resultados.
+4. Ejecutá `cd backend && mvn test` para comprobar también que el payload apilado no puede borrar perfiles.
 
-**Comprobación de consultas apiladas (más avanzada, modifica datos reales):**
-- Cambiar la zona de todos los perfiles: `zzz'; UPDATE profiles SET zona='Hackeado'; --`
-- Borrar todos los perfiles: `zzz'; DELETE FROM profiles; --`
+La entrada se limita a 100 caracteres, los errores no exponen detalles internos y la aplicación se conecta mediante un rol PostgreSQL sin permisos de `DELETE` ni DDL. Las decisiones y pruebas están documentadas en `SEGURIDAD.md`.
 
-Hacé una copia de los datos antes de probar estos dos últimos, o volvé a cargarlos reiniciando el backend con la tabla vacía (el `DataSeeder` la vuelve a poblar).
-
-**Corrección:** usar un método derivado de Spring Data (`findByZonaContainingIgnoreCase`) o una consulta con parámetros nombrados, y nunca ejecutar texto de usuario como lote de sentencias.
+**Implementación anterior vulnerable:** concatenaba la entrada en SQL y usaba un `Statement` capaz de ejecutar texto aportado por el usuario. Los payloads históricos se mantienen solamente como casos de regresión automatizados.
 
 ### 2. IDOR (CWE-639) — `PUT /api/profiles/{id}`
 Se exige estar logueado, pero no se verifica que el perfil sea tuyo (`ProfileController.update`).
@@ -46,7 +43,7 @@ Se exige estar logueado, pero no se verifica que el perfil sea tuyo (`ProfileCon
 3. Confirmá que el botón "Editar" no aparece sobre los perfiles de Ana: la interfaz lo oculta porque no son tuyos.
 4. Copiá el token de Luis desde Local Storage (F12 → Application → Local Storage → `session`) y ejecutá:
    ```bash
-   curl -X PUT http://localhost:8080/api/profiles/<ID_DEL_PERFIL_DE_ANA> \
+   curl -X PUT http://localhost:8082/api/profiles/<ID_DEL_PERFIL_DE_ANA> \
      -H "Authorization: Bearer <TOKEN_DE_LUIS>" \
      -H "Content-Type: application/json" \
      -d '{"nombre":"Hackeado","apellido":"X","zona":"Z","descripcion":"","intereses":"","estudios":""}'
