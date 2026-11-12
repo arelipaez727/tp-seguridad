@@ -10,3 +10,4 @@ frontend/dist/
 # Archivos de entorno y editores
 .env
 .vscode/
+.kiro/
