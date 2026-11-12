@@ -54,11 +54,46 @@ Las credenciales locales tienen valores predeterminados para facilitar la ejecuc
 
 ## Parte II — Corrección de IDOR (CWE-639)
 
-En `ProfileController.update` (`PUT /api/profiles/{id}`), se incorporó la verificación de propiedad del recurso antes de permitir cualquier modificación:
+Se corrigió la referencia directa insegura a objetos (CWE-639) en `PUT /api/profiles/{id}`.
 
-- Se obtiene el identificador del usuario autenticado desde el token JWT (`(Long) auth.getPrincipal()`).
-- Se compara con el `ownerId` del perfil almacenado en la base de datos.
-- Si no coinciden, el servidor rechaza la operación con `403 Forbidden` (`"No tenés permiso para modificar este perfil"`).
+### Problema original
+
+El endpoint exigía un token JWT válido, pero no verificaba que el perfil solicitado perteneciera al usuario autenticado. Cualquier usuario logueado podía modificar el perfil de otro usuario con solo conocer su `id`, que es un entero secuencial fácil de adivinar o enumerar.
+
+### Corrección aplicada
+
+En `ProfileController.update`, antes de aplicar los cambios, se compara el `ownerId` del perfil contra el `id` del usuario autenticado (obtenido del token JWT a través de `Authentication.getPrincipal()`):
+
+```java
+Long userId = (Long) auth.getPrincipal();
+if (!p.ownerId.equals(userId)) {
+    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No tenés permiso para modificar este perfil");
+}
+```
+
+Si el perfil no pertenece al usuario, se lanza `ResponseStatusException` con estado 403, que es manejada de forma controlada por el mismo mecanismo que ya filtra errores internos (ver punto 4), sin exponer detalles de implementación.
+
+### Por qué esta es la corrección correcta
+
+El control de autorización debe aplicarse siempre del lado del servidor, nunca confiarse a que la interfaz oculte una opción. Antes de este cambio, el frontend ya ocultaba el botón "Editar" sobre perfiles ajenos, pero eso no impedía que alguien enviara el pedido directamente a la API (por ejemplo con `curl` o desde la consola del navegador), evitando la interfaz por completo. La verificación en el backend es la que efectivamente impide la acción, independientemente del cliente que la solicite.
+
+### Alcance del fix
+
+Se revisaron los demás endpoints de `ProfileController` para descartar el mismo problema:
+
+- `POST /api/profiles`: no es vulnerable, porque el `ownerId` se asigna siempre a partir del usuario autenticado (`auth.getPrincipal()`) y nunca se toma del cuerpo del pedido. No es posible crear un perfil a nombre de otro usuario.
+- `GET /api/profiles` y `GET /api/profiles/{id}`: son endpoints de lectura, públicos por diseño. Cualquiera puede consultar cualquier perfil sin autenticarse, ya que el propósito de la aplicación es que los perfiles de cuidadores sean visibles públicamente. Esto no constituye IDOR, sino una decisión de diseño del dominio.
+
+### Pruebas de regresión manuales
+
+Se verificaron dos casos con dos usuarios de prueba (`ana@demo.com` y `luis@demo.com`):
+
+- Un usuario autenticado que intenta modificar el perfil de otro usuario recibe HTTP 403, y el perfil original no se modifica.
+- El usuario dueño del perfil puede seguir editándolo normalmente (HTTP 200).
+
+### Limitación a tener en cuenta
+
+Esta corrección es específica del endpoint `PUT /api/profiles/{id}`. Cualquier endpoint que se agregue en el futuro y reciba un identificador de recurso (por ejemplo, una eventual eliminación de perfiles) debe implementar la misma verificación de propiedad; no es un control transversal automático para toda la aplicación.
 
 ---
 
