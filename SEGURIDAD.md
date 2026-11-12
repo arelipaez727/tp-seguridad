@@ -126,13 +126,24 @@ Se incorporó el servicio `LoginAttemptService` para controlar los intentos de i
   - **Tiene al menos 256 bits (32 bytes)**, validados al iniciar el servicio.
   - **Se suministra mediante la variable de entorno `JWT_SECRET`** (codificada en Base64).
   - **No queda escrita en el código fuente ni en archivos versionados del repositorio.**
-- **Incorporación de vencimiento en el JWT (`exp`):**
+- **Incorporación de identificador único (`jti`) y vencimiento en el JWT (`exp`):**
   ```java
+  .id(UUID.randomUUID().toString())
   .issuedAt(new Date(now))
   .expiration(new Date(now + 15 * 60 * 1000L))
   .signWith(key, Jwts.SIG.HS256)
   ```
-  Cada token emitido tiene ahora una **duración máxima de 15 minutos**, reduciendo la ventana de exposición en caso de robo del token.
+  Cada token emitido incluye un identificador único (`jti`) y tiene una **duración máxima de 15 minutos**, reduciendo la ventana de exposición en caso de robo del token.
+
+### Corrección 5 — Revocación individual de tokens JWT en el cierre de sesión (CWE-613)
+
+**Problema original:** Al hacer clic en "Salir", el token únicamente se eliminaba del `localStorage` del navegador, pero seguía siendo aceptado por el servidor si alguien lo había copiado previamente.
+
+**Solución aplicada (`JwtService.java`, `AuthController.java` y `frontend/src/App.jsx`):**
+- **Identificador único por token (`jti`):** al emitirse un JWT en `JwtService.generate`, se le asigna un `UUID` único mediante `.id(UUID.randomUUID().toString())`.
+- **Lista de revocación en el servidor (`revokedTokens`):** `JwtService` mantiene un mapa concurrente (`ConcurrentHashMap<String, Long>`) que asocia el identificador `jti` del token revocado con su timestamp de expiración, limpiando automáticamente las entradas vencidas.
+- **Endpoint `POST /api/auth/logout` (`AuthController.java`):** recibe el encabezado `Authorization: Bearer <token>`, verifica el token e invoca `jwt.revoke(token)` para invalidar ese JWT específico en el servidor. El botón **"Salir"** del frontend ahora llama a este endpoint antes de limpiar la sesión local.
+- **Verificación en cada solicitud (`JwtService.parse`):** antes de autorizar cualquier pedido en `JwtFilter`, `parse(token)` comprueba si su `jti` figura en `revokedTokens`; si fue revocado, lanza una `JwtException` y el servidor rechaza el acceso (`401`/`403`).
 
 ---
 

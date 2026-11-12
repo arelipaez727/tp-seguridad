@@ -111,7 +111,14 @@ export default function App() {
   useEffect(() => { load(""); }, []);
 
   const start = (s) => { localStorage.setItem("session", JSON.stringify(s)); setSession(s); };
-  const logout = () => { localStorage.removeItem("session"); setSession(null); setEditing(null); };
+  const logout = async () => {
+    if (session?.token) {
+      await api("/auth/logout", { method: "POST" }, session.token).catch(() => {});
+    }
+    localStorage.removeItem("session");
+    setSession(null);
+    setEditing(null);
+  };
 
   const save = async (p) => {
     try {

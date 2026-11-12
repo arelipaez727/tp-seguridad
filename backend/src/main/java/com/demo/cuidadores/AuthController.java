@@ -131,4 +131,29 @@ public class AuthController {
             )
         );
     }
+
+    // LOGOUT CON REVOCACIÓN INDIVIDUAL DEL JWT
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(401).body(
+                Map.of("error", "Token requerido")
+            );
+        }
+
+        String token = authHeader.substring(7).trim();
+
+        try {
+            jwt.revoke(token);
+            return ResponseEntity.ok(
+                Map.of("message", "Sesión cerrada y token revocado")
+            );
+        } catch (Exception e) {
+            return ResponseEntity.status(401).body(
+                Map.of("error", "Token inválido o expirado")
+            );
+        }
+    }
 }
