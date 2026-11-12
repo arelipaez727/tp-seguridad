@@ -15,7 +15,7 @@ public class JwtService {
     // FIX: secreto aleatorio de 256 bits desde variable de entorno:
     //      Keys.hmacShaKeyFor(Decoders.BASE64.decode(System.getenv("JWT_SECRET")))
     private static final String SECRET = "cuidadores2026";
-    private final SecretKey key = Keys.hmacShaKeyFor(Arrays.copyOf(SECRET.getBytes(StandardCharsets.UTF_8), 32));
+    private final SecretKey key = Keys.hmacShaKeyFor(Arrays.copyOf(SECRET.getBytes(StandardCharsets.UTF_8), 32)); // esto completa la clave con ceros si es necesario para llegar a 32 bytes pero no la hace aleatoria ni dificil de predecir 
 
     public String generate(Long userId, String email) {
         // ⚠️ VULNERABILIDAD 3c — TOKEN SIN EXPIRACIÓN NI REVOCACIÓN (CWE-613)

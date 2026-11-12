@@ -25,12 +25,18 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("token", jwt.generate(u.id, u.email), "userId", u.id));
     }
 
-    // ⚠️ VULNERABILIDAD 3a (cont.) — SIN LÍMITE DE INTENTOS (CWE-307): se pueden probar claves sin freno ni bloqueo.
-    // FIX: contador por email/IP con bloqueo temporal o retardo creciente (p. ej. Bucket4j), y alertas de intentos fallidos.
+    // ⚠️ VULNERABILIDAD 3a (cont.) — SIN LÍMITE DE INTENTOS (CWE-307) Y ENUMERACIÓN DE CUENTAS (CWE-204):
+    // Se pueden probar claves sin freno ni bloqueo, y devuelve mensajes distintos si el usuario no existe
+    // o si la contraseña es incorrecta, permitiendo enumerar cuentas registradas.
+    // FIX: contador por email/IP con bloqueo temporal o retardo creciente (p. ej. Bucket4j), y devolver siempre
+    // el mismo mensaje genérico ("Email o contraseña incorrectos").
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody Creds c) {
-        return repo.findByEmail(c.email()).filter(u -> enc.matches(c.password(), u.password))
-            .<ResponseEntity<?>>map(u -> ResponseEntity.ok(Map.of("token", jwt.generate(u.id, u.email), "userId", u.id)))
-            .orElse(ResponseEntity.status(401).body(Map.of("error", "Email o contraseña incorrectos")));
+        User u = repo.findByEmail(c.email()).orElse(null);
+        if (u == null)
+            return ResponseEntity.status(401).body(Map.of("error", "El usuario no existe"));
+        if (!enc.matches(c.password(), u.password))
+            return ResponseEntity.status(401).body(Map.of("error", "Contraseña incorrecta"));
+        return ResponseEntity.ok(Map.of("token", jwt.generate(u.id, u.email), "userId", u.id));
     }
 }
