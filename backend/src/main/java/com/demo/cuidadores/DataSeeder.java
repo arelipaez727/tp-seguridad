@@ -29,10 +29,12 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private User user(String email) {
-        User u = new User();
-        u.email = email;
-        u.password = enc.encode("demo1234");
-        return users.save(u);
+        return users.findByEmail(email).orElseGet(() -> {
+            User u = new User();
+            u.email = email;
+            u.password = enc.encode("demo1234");
+            return users.save(u);
+        });
     }
 
     private void profile(User owner, String n, String a, String z, String e, String i, String d) {
