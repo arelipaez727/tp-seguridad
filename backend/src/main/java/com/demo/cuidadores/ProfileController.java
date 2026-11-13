@@ -19,12 +19,6 @@ public class ProfileController {
         // Sin zona: devuelve la lista completa (uso normal del buscador).
         if (zona == null || zona.isBlank()) return repo.findAll();
 
-        // ⚠️ VULNERABILIDAD 1 — SQL INJECTION CON CONSULTAS APILADAS (CWE-89)
-        // El texto de la zona se concatena directamente en SQL nativo y se ejecuta con un Statement JDBC plano,
-        // que admite varias sentencias separadas por ";". Esto habilita tanto lectura fuera de lo previsto
-        // (ej: zzz' OR '1'='1' --) como modificación o borrado de datos (ej: zzz'; DELETE FROM profiles; --).
-        // FIX: usar un método derivado de Spring Data (findByZonaContainingIgnoreCase) o una consulta con
-        // parámetros nombrados, y nunca ejecutar texto de usuario como lote de sentencias.
         String sql = "SELECT id, owner_id AS \"ownerId\", nombre, apellido, zona, descripcion, intereses, estudios " +
                      "FROM profiles WHERE zona ILIKE '%" + zona + "%'";
         List<Profile> out = new ArrayList<>();
